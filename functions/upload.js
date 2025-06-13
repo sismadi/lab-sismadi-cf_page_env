@@ -1,33 +1,52 @@
 export async function onRequestPost(context) {
-  try {
-    const formData = await context.request.formData();
-    const file = formData.get("image");
-    const content = await file.arrayBuffer();
-    const base64Content = btoa(String.fromCharCode(...new Uint8Array(content)));
+  const { request, env } = context;
 
-    const filename = `${new Date().toISOString().replace(/[:.]/g, '-')}_${file.name}`;
-    const url = `https://api.github.com/repos/${context.env.REPO_OWNER}/${context.env.REPO_NAME}/contents/${context.env.REPO_PATH}${filename}`;
+  const token = env.GITHUB_TOKEN; // simpan di Cloudflare Pages Secrets
+  const repoOwner = env.REPO_OWNER || "codepiawai";
+  const repoName = env.REPO_NAME || "files";
+  const pathInRepo = env.REPO_PATH || "uploads/";
 
-    const response = await fetch(url, {
-      method: "PUT",
-      headers: {
-        "Authorization": `token ${context.env.GITHUB_TOKEN}`,
-        "Content-Type": "application/json",
-        "User-Agent": "CloudflarePagesUploader"
-      },
-      body: JSON.stringify({
-        message: "Upload via Cloudflare Pages",
-        content: base64Content
-      })
+  // Baca form-data
+  const formData = await request.formData();
+  const file = formData.get("image");
+
+  if (!file || typeof file === "string") {
+    return new Response("Gagal menerima file.", { status: 400 });
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const base64Content = btoa(
+    String.fromCharCode(...new Uint8Array(arrayBuffer))
+  );
+
+  const now = new Date();
+  const dateString = now.toISOString().replace(/[:.]/g, "-");
+  const finalPath = `${pathInRepo}${dateString}_${file.name}`;
+
+  const githubApiUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/contents/${finalPath}`;
+
+  const body = JSON.stringify({
+    message: "Upload image via API",
+    content: base64Content
+  });
+
+  const response = await fetch(githubApiUrl, {
+    method: "PUT",
+    headers: {
+      "Authorization": `token ${token}`,
+      "Content-Type": "application/json",
+      "User-Agent": "CF-Worker"
+    },
+    body
+  });
+
+  const result = await response.json();
+
+  if (response.status === 201) {
+    return new Response("Berhasil diunggah ke GitHub.");
+  } else {
+    return new Response(`Gagal mengunggah ke GitHub. Kode: ${response.status}\n${JSON.stringify(result)}`, {
+      status: response.status
     });
-
-    const result = await response.json();
-    if (response.status === 201) {
-      return new Response("Berhasil diunggah ke GitHub!", { status: 201 });
-    } else {
-      return new Response("Gagal: " + JSON.stringify(result), { status: 500 });
-    }
-  } catch (err) {
-    return new Response("Error: " + err.message, { status: 500 });
   }
 }
